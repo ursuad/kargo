@@ -4,7 +4,9 @@ listen-address=0.0.0.0
 
 addn-hosts=/etc/hosts
 
-bogus-priv
+strict-order
+# Forward k8s domain to kube-dns
+server=/{{ dns_domain }}/{{ skydns_server }}
 
 #Set upstream dns servers
 {% if upstream_dns_servers is defined %}
@@ -16,5 +18,9 @@ server={{ srv }}
  server=8.8.4.4
 {% endif %}
 
-# Forward k8s domain to kube-dns
-server=/{{ dns_domain }}/{{ skydns_server }}
+no-resolv
+no-negcache
+cache-size=1000
+max-cache-ttl=10
+max-ttl=20
+log-facility=-
