@@ -3,6 +3,8 @@ kind: Pod
 metadata:
   name: kube-apiserver
   namespace: kube-system
+  labels:
+    k8s-app: kube-apiserver
 spec:
   hostNetwork: true
   containers:
@@ -13,10 +15,15 @@ spec:
     - apiserver
     - --advertise-address={{ ip | default(ansible_default_ipv4.address) }}
     - --etcd-servers={{ etcd_access_endpoint }}
+    - --etcd-quorum-read=true
+    - --etcd-cafile={{ etcd_cert_dir }}/ca.pem
+    - --etcd-certfile={{ etcd_cert_dir }}/node.pem
+    - --etcd-keyfile={{ etcd_cert_dir }}/node-key.pem
     - --insecure-bind-address={{ kube_apiserver_insecure_bind_address }}
     - --apiserver-count={{ kube_apiserver_count }}
-    - --admission-control=NamespaceLifecycle,NamespaceExists,LimitRanger,ServiceAccount,ResourceQuota
+    - --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,DefaultStorageClass,ResourceQuota
     - --service-cluster-ip-range={{ kube_service_addresses }}
+    - --service-node-port-range={{ kube_apiserver_node_port_range }}
     - --client-ca-file={{ kube_cert_dir }}/ca.pem
     - --basic-auth-file={{ kube_users_dir }}/known_users.csv
     - --tls-cert-file={{ kube_cert_dir }}/apiserver.pem
@@ -29,6 +36,9 @@ spec:
 {%   for conf in kube_api_runtime_config %}
     - --runtime-config={{ conf }}
 {%   endfor %}
+{% endif %}
+{% if enable_network_policy is defined and enable_network_policy == True %}
+    - --runtime-config=extensions/v1beta1/networkpolicies=true
 {% endif %}
     - --v={{ kube_log_level | default('2') }}
     - --allow-privileged=true
@@ -46,6 +56,9 @@ spec:
     - mountPath: /etc/ssl/certs
       name: ssl-certs-host
       readOnly: true
+    - mountPath: {{ etcd_cert_dir }}
+      name: etcd-certs
+      readOnly: true
     - mountPath: /var/log/
       name: logfile
   volumes:
@@ -55,6 +68,9 @@ spec:
   - hostPath:
       path: /etc/ssl/certs/
     name: ssl-certs-host
+  - hostPath:
+      path: {{ etcd_cert_dir }}
+    name: etcd-certs
   - hostPath:
       path: /var/log/
     name: logfile

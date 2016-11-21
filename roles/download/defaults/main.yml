@@ -1,30 +1,37 @@
 ---
 local_release_dir: /tmp
 
-# if this is set to true will only download files once
+# if this is set to true will only download files once. Doesn't work
+# on CoreOS unless the download_localhost is true and localhost
+# is running another OS type. Default compress level is 9 (best).
 download_run_once: False
+download_compress: 9
+
+# if this is set to true, uses the localhost for download_run_once mode
+# (requires docker and sudo to access docker). You may want this option for
+# local caching of docker images or for CoreOS cluster nodes.
+# Otherwise, uses the first node in the kube-master group to store images
+# in the download_run_once mode.
+download_localhost: False
 
 # Versions
-include_vars: kube_versions.yml
+kube_version: v1.4.6
 
 etcd_version: v3.0.6
 #TODO(mattymo): Move calico versions to roles/network_plugins/calico/defaults
 # after migration to container download
-calico_version: v0.20.0
-calico_cni_version: v1.3.1
+calico_version: v1.0.0-beta
+calico_cni_version: v1.4.2
 weave_version: v1.6.1
-flannel_version: 0.5.5
+flannel_version: v0.6.2
 flannel_server_helper_version: 0.1
+pod_infra_version: 3.0
 
 # Download URL's
 etcd_download_url: "https://storage.googleapis.com/kargo/{{etcd_version}}_etcd"
-calico_cni_download_url: "https://storage.googleapis.com/kargo/{{calico_cni_version}}_calico-cni-plugin"
-calico_cni_ipam_download_url: "https://storage.googleapis.com/kargo/{{calico_cni_version}}_calico-cni-plugin-ipam"
 weave_download_url: "https://storage.googleapis.com/kargo/{{weave_version}}_weave"
 
 # Checksums
-calico_cni_checksum: "ac05cb9254b5aaa5822cf10325983431bd25489147f2edf9dec7e43d99c43e77"
-calico_cni_ipam_checksum: "3df6951a30749c279229e7e318e74ac4e41263996125be65257db7cd25097273"
 weave_checksum: "9bf9d6e5a839e7bcbb28cc00c7acae9d09284faa3e7a3720ca9c2b9e93c68580"
 etcd_checksum: "385afd518f93e3005510b7aaa04d38ee4a39f06f5152cd33bb86d4f0c94c7485"
 
@@ -38,31 +45,19 @@ flannel_server_helper_image_tag: "{{ flannel_server_helper_version }}"
 flannel_image_repo: "quay.io/coreos/flannel"
 flannel_image_tag: "{{ flannel_version }}"
 calicoctl_image_repo: "calico/ctl"
-calicoctl_image_tag: "{{ calico_version }}"
+# TODO(apanchenko): v1.0.0-beta can't execute `node run` from Docker container
+# for details see https://github.com/projectcalico/calico-containers/issues/1291
+calicoctl_image_tag: "v0.22.0"
 calico_node_image_repo: "calico/node"
 calico_node_image_tag: "{{ calico_version }}"
+calico_cni_image_repo: "calico/cni"
+calico_cni_image_tag: "{{ calico_cni_version }}"
 hyperkube_image_repo: "quay.io/coreos/hyperkube"
 hyperkube_image_tag: "{{ kube_version }}_coreos.0"
+pod_infra_image_repo: "gcr.io/google_containers/pause-amd64"
+pod_infra_image_tag: "{{ pod_infra_version }}"
 
 downloads:
-  calico_cni_plugin:
-    dest: calico/bin/calico
-    version: "{{calico_cni_version}}"
-    sha256: "{{ calico_cni_checksum }}"
-    source_url: "{{ calico_cni_download_url }}"
-    url: "{{ calico_cni_download_url }}"
-    owner: "root"
-    mode: "0755"
-    enabled: "{{ kube_network_plugin == 'calico' }}"
-  calico_cni_plugin_ipam:
-    dest: calico/bin/calico-ipam
-    version: "{{calico_cni_version}}"
-    sha256: "{{ calico_cni_ipam_checksum }}"
-    source_url: "{{ calico_cni_ipam_download_url }}"
-    url: "{{ calico_cni_ipam_download_url }}"
-    owner: "root"
-    mode: "0755"
-    enabled: "{{ kube_network_plugin == 'calico' }}"
   weave:
     dest: weave/bin/weave
     version: "{{weave_version}}"
@@ -92,22 +87,31 @@ downloads:
     container: true
     repo: "{{ flannel_image_repo }}"
     tag: "{{ flannel_image_tag }}"
-    enabled: "{{ kube_network_plugin == 'flannel' }}"
+    enabled: "{{ kube_network_plugin == 'flannel' or kube_network_plugin == 'canal' }}"
   flannel_server_helper:
     container: true
     repo: "{{ flannel_server_helper_image_repo }}"
     tag: "{{ flannel_server_helper_image_tag }}"
-    enabled: "{{ kube_network_plugin == 'flannel' }}"
+    enabled: "{{ kube_network_plugin == 'flannel' or kube_network_plugin == 'canal' }}"
   calicoctl:
     container: true
     repo: "{{ calicoctl_image_repo }}"
     tag: "{{ calicoctl_image_tag }}"
-    enabled: "{{ kube_network_plugin == 'calico' }}"
+    enabled: "{{ kube_network_plugin == 'calico' or kube_network_plugin == 'canal' }}"
   calico_node:
     container: true
     repo: "{{ calico_node_image_repo }}"
     tag: "{{ calico_node_image_tag }}"
-    enabled: "{{ kube_network_plugin == 'calico' }}"
+    enabled: "{{ kube_network_plugin == 'calico' or kube_network_plugin == 'canal' }}"
+  calico_cni:
+    container: true
+    repo: "{{ calico_cni_image_repo }}"
+    tag: "{{ calico_cni_image_tag }}"
+    enabled: "{{ kube_network_plugin == 'calico' or kube_network_plugin == 'canal' }}"
+  pod_infra:
+    container: true
+    repo: "{{ pod_infra_image_repo }}"
+    tag: "{{ pod_infra_image_tag }}"
 
 download:
   container: "{{ file.container|default('false') }}"

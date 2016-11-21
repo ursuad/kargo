@@ -3,6 +3,8 @@ kind: Pod
 metadata:
   name: kube-proxy
   namespace: kube-system
+  labels:
+    k8s-app: kube-proxy
 spec:
   hostNetwork: true
   containers:
@@ -17,7 +19,11 @@ spec:
     - --kubeconfig=/etc/kubernetes/node-kubeconfig.yaml
 {% endif %}
     - --bind-address={{ ip | default(ansible_default_ipv4.address) }}
+    - --cluster-cidr={{ kube_pods_subnet }}
     - --proxy-mode={{ kube_proxy_mode }}
+{% if kube_proxy_masquerade_all and kube_proxy_mode == "iptables" %}
+    - --masquerade-all
+{% endif %}
     securityContext:
       privileged: true
     volumeMounts:
