@@ -10,6 +10,7 @@ spec:
   containers:
   - name: kube-controller-manager
     image: {{ hyperkube_image_repo }}:{{ hyperkube_image_tag }}
+    imagePullPolicy: {{ k8s_image_pull_policy }}
     command:
     - /hyperkube
     - controller-manager
@@ -18,8 +19,8 @@ spec:
     - --service-account-private-key-file={{ kube_cert_dir }}/apiserver-key.pem
     - --root-ca-file={{ kube_cert_dir }}/ca.pem
     - --enable-hostpath-provisioner={{ kube_hostpath_dynamic_provisioner }}
-    - --v={{ kube_log_level | default('2') }}
-{% if cloud_provider is defined and cloud_provider == "openstack" %}
+    - --v={{ kube_log_level }}
+{% if cloud_provider is defined and cloud_provider in ["openstack", "azure"] %}
     - --cloud-provider={{cloud_provider}}
     - --cloud-config={{ kube_config_dir }}/cloud_config
 {% elif cloud_provider is defined and cloud_provider == "aws" %}
@@ -36,7 +37,7 @@ spec:
     - mountPath: {{ kube_cert_dir }}
       name: ssl-certs-kubernetes
       readOnly: true
-{% if cloud_provider is defined and cloud_provider == "openstack" %}
+{% if cloud_provider is defined and cloud_provider in ["openstack", "azure"] %}
     - mountPath: {{ kube_config_dir }}/cloud_config
       name: cloudconfig
       readOnly: true
@@ -45,7 +46,7 @@ spec:
   - hostPath:
       path: {{ kube_cert_dir }}
     name: ssl-certs-kubernetes
-{% if cloud_provider is defined and cloud_provider == "openstack" %}
+{% if cloud_provider is defined and cloud_provider in ["openstack", "azure"] %}
   - hostPath:
       path: {{ kube_config_dir }}/cloud_config
     name: cloudconfig

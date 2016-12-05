@@ -9,6 +9,16 @@
   set_fact:
     resolvconffile: >-
       {%- if resolvconf.rc == 0 -%}/etc/resolvconf/resolv.conf.d/head{%- else -%}/etc/resolv.conf{%- endif -%}
+  when: ansible_os_family != "CoreOS"
+
+- name: target temporary resolvconf cloud init file
+  set_fact:
+    resolvconffile: /tmp/resolveconf_cloud_init_conf
+  when: ansible_os_family == "CoreOS"
+
+- name: create temporary resolveconf cloud init file
+  command: cp -f /etc/resolv.conf "{{ resolvconffile }}"
+  when: ansible_os_family == "CoreOS"
 
 - name: generate search domains to resolvconf
   set_fact:
@@ -38,7 +48,20 @@
   when: resolvconf.rc == 0
   notify: Dnsmasq | update resolvconf
 
-- name: Add search domains to resolv.conf
+- name: Remove search and nameserver options from resolvconf cloud init temporary file
+  lineinfile:
+    dest: "{{resolvconffile}}"
+    state: absent
+    regexp: "^{{ item }}.*$"
+    backup: yes
+    follow: yes
+  with_items:
+    - search
+    - nameserver
+  when: ansible_os_family == "CoreOS"
+  notify: Dnsmasq | update resolvconf for CoreOS
+
+- name: Add search domains to resolvconf file
   lineinfile:
     line: "search {{searchentries}}"
     dest: "{{resolvconffile}}"
@@ -56,7 +79,7 @@
       nameserver {{ item }}
       {% endfor %}
     state: present
-    insertafter: "^search.*$"
+    insertafter: "^search default.svc.*$"
     create: yes
     backup: yes
     follow: yes
@@ -100,3 +123,17 @@
   copy: src=dhclient_nodnsupdate dest=/etc/dhcp/dhclient.d/nodnsupdate mode=u+x
   notify: Dnsmasq | restart network
   when: ansible_os_family == "RedHat"
+
+- name: get temporary resolveconf cloud init file content
+  command: cat {{ resolvconffile }}
+  register: cloud_config
+  when: ansible_os_family == "CoreOS"
+
+- name: persist resolvconf cloud init file
+  template:
+    dest: "{{resolveconf_cloud_init_conf}}"
+    src: resolvconf.j2
+    owner: root
+    mode: 0644
+  notify: Dnsmasq | update resolvconf for CoreOS
+  when: ansible_os_family == "CoreOS"

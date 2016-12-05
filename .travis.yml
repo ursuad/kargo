@@ -9,7 +9,6 @@ git:
 env:
   global:
     GCE_USER=travis
-    LOG_LEVEL=-v
     SSH_USER=$GCE_USER
     TEST_ID=$TRAVIS_JOB_NUMBER
     CONTAINER_ENGINE=docker
@@ -22,64 +21,42 @@ env:
   matrix:
     # Debian Jessie
     - >-
-      KUBE_NETWORK_PLUGIN=flannel
-      CLOUD_IMAGE=debian-8-kubespray
-      CLOUD_REGION=europe-west1-b
+      KUBE_NETWORK_PLUGIN=canal
+      CLOUD_IMAGE=debian-8
+      CLOUD_REGION=europe-west1-d
       CLUSTER_MODE=default
     - >-
       KUBE_NETWORK_PLUGIN=calico
-      CLOUD_IMAGE=debian-8-kubespray
-      CLOUD_REGION=us-central1-c
+      CLOUD_IMAGE=debian-8
+      CLOUD_REGION=us-central1-b
       CLUSTER_MODE=default
 
     # Centos 7
     - >-
       KUBE_NETWORK_PLUGIN=flannel
-      CLOUD_IMAGE=centos-7-sudo
-      CLOUD_REGION=asia-east1-c
+      CLOUD_IMAGE=centos-7
+      CLOUD_REGION=europe-west1-d
       CLUSTER_MODE=default
     - >-
       KUBE_NETWORK_PLUGIN=calico
-      CLOUD_IMAGE=centos-7-sudo
+      CLOUD_IMAGE=centos-7
       CLOUD_REGION=europe-west1-b
-      CLUSTER_MODE=default
-    - >-
-      KUBE_NETWORK_PLUGIN=weave
-      CLOUD_IMAGE=centos-7-sudo
-      CLOUD_REGION=us-central1-c
       CLUSTER_MODE=default
 
    # Redhat 7
     - >-
-      KUBE_NETWORK_PLUGIN=calico
-      CLOUD_IMAGE=rhel-7-sudo
-      CLOUD_REGION=asia-east1-c
-      CLUSTER_MODE=default
-    - >-
       KUBE_NETWORK_PLUGIN=weave
-      CLOUD_IMAGE=rhel-7-sudo
+      CLOUD_IMAGE=rhel-7
       CLOUD_REGION=europe-west1-b
-      CLUSTER_MODE=default
-
-    # Ubuntu 16.04
-    - >-
-      KUBE_NETWORK_PLUGIN=canal
-      CLOUD_IMAGE=ubuntu-1604-xenial
-      CLOUD_REGION=us-central1-c
-      CLUSTER_MODE=default
-    - >-
-      KUBE_NETWORK_PLUGIN=weave
-      CLOUD_IMAGE=ubuntu-1604-xenial
-      CLOUD_REGION=asia-east1-c
       CLUSTER_MODE=default
 
     # CoreOS stable
-    - >-
-      KUBE_NETWORK_PLUGIN=weave
-      CLOUD_IMAGE=coreos-stable
-      CLOUD_REGION=europe-west1-b
-      CLUSTER_MODE=default
-      BOOTSTRAP_OS=coreos
+    #- >-
+    #  KUBE_NETWORK_PLUGIN=weave
+    #  CLOUD_IMAGE=coreos-stable
+    #  CLOUD_REGION=europe-west1-a
+    #  CLUSTER_MODE=default
+    #  BOOTSTRAP_OS=coreos
     - >-
       KUBE_NETWORK_PLUGIN=canal
       CLOUD_IMAGE=coreos-stable
@@ -90,29 +67,24 @@ env:
     # Extra cases for separated roles
     - >-
       KUBE_NETWORK_PLUGIN=canal
-      CLOUD_IMAGE=rhel-7-sudo
-      CLOUD_REGION=europe-west1-b
-      CLUSTER_MODE=separate
-    - >-
-      KUBE_NETWORK_PLUGIN=calico
-      CLOUD_IMAGE=ubuntu-1604-xenial
-      CLOUD_REGION=us-central1-a
+      CLOUD_IMAGE=rhel-7
+      CLOUD_REGION=europe-west1-c
       CLUSTER_MODE=separate
     - >-
       KUBE_NETWORK_PLUGIN=weave
-      CLOUD_IMAGE=debian-8-kubespray
-      CLOUD_REGION=us-east1-d
+      CLOUD_IMAGE=ubuntu-1604-xenial
+      CLOUD_REGION=us-west1-b
       CLUSTER_MODE=separate
     - >-
       KUBE_NETWORK_PLUGIN=calico
       CLOUD_IMAGE=coreos-stable
-      CLOUD_REGION=asia-east1-c
+      CLOUD_REGION=us-central1-f
       CLUSTER_MODE=separate
       BOOTSTRAP_OS=coreos
 
 matrix:
   allow_failures:
-    - env: KUBE_NETWORK_PLUGIN=weave CLOUD_IMAGE=coreos-stable CLOUD_REGION=europe-west1-b CLUSTER_MODE=default BOOTSTRAP_OS=coreos
+    - env: KUBE_NETWORK_PLUGIN=weave CLOUD_IMAGE=coreos-stable CLOUD_REGION=europe-west1-a CLUSTER_MODE=default BOOTSTRAP_OS=coreos
 
 before_install:
   # Install Ansible.
@@ -173,22 +145,6 @@ script:
   - $HOME/.local/bin/ansible-playbook -i inventory/inventory.ini -e ansible_python_interpreter=${PYPATH} -u $SSH_USER -e ansible_ssh_user=$SSH_USER $SSH_ARGS -b --become-user=root tests/testcases/020_check-create-pod.yml $LOG_LEVEL
     ## Ping the between 2 pod
   - $HOME/.local/bin/ansible-playbook -i inventory/inventory.ini -e ansible_python_interpreter=${PYPATH} -u $SSH_USER -e ansible_ssh_user=$SSH_USER $SSH_ARGS -b --become-user=root tests/testcases/030_check-network.yml $LOG_LEVEL
-
-after_failure:
-  - >
-    $HOME/.local/bin/ansible-playbook -i inventory/inventory.ini -u $SSH_USER
-    -e ansible_ssh_user=$SSH_USER $SSH_ARGS -b --become-user=root -e dir=$HOME
-    -e ansible_python_interpreter=${PYPATH}
-    scripts/collect-info.yaml
-  - >
-    $HOME/.local/bin/ansible-playbook tests/cloud_playbooks/upload-logs-gcs.yml -i "localhost," -c local
-    -e kube_network_plugin=${KUBE_NETWORK_PLUGIN}
-    -e gce_project_id=${GCE_PROJECT_ID}
-    -e gs_key=${GS_ACCESS_KEY_ID}
-    -e gs_skey=${GS_SECRET_ACCESS_KEY}
-    -e ostype=${CLOUD_IMAGE}
-    -e commit=${TRAVIS_COMMIT}
-    -e dir=${HOME}
 
 after_script:
   - >
