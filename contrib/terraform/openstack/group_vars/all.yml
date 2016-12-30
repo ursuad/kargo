@@ -1,5 +1,5 @@
 # Valid bootstrap options (required): ubuntu, coreos, none
-bootstrap_os: "none"
+bootstrap_os: none
 
 # Directory where the binaries will be installed
 bin_dir: /usr/local/bin
@@ -35,6 +35,8 @@ kube_users:
 cluster_name: cluster.local
 # Subdomains of DNS domain to be resolved via /etc/resolv.conf
 ndots: 5
+# Deploy netchecker app to verify DNS resolve as an HTTP service
+deploy_netchecker: false
 
 # For some environments, each node has a pubilcally accessible
 # address and an address it should bind services to.  These are
@@ -62,7 +64,7 @@ ndots: 5
 # Enable multiaccess to configure clients to access all of the etcd members directly
 # as the "http://hostX:port, http://hostY:port, ..." and ignore the proxy loadbalancers.
 # This may be the case if clients support and loadbalance multiple etcd servers  natively.
-etcd_multiaccess: false
+etcd_multiaccess: true
 
 # Assume there are no internal loadbalancers for apiservers exist and listen on
 # kube_apiserver_port (default 443)
@@ -123,21 +125,40 @@ dns_server: "{{ kube_service_addresses|ipaddr('net')|ipaddr(2)|ipaddr('address')
 
 # There are some changes specific to the cloud providers
 # for instance we need to encapsulate packets with some network plugins
-# If set the possible values are either 'gce', 'aws' or 'openstack'
+# If set the possible values are either 'gce', 'aws', 'azure' or 'openstack'
 # When openstack is used make sure to source in the openstack credentials
 # like you would do when using nova-client before starting the playbook.
+# When azure is used, you need to also set the following variables.
 # cloud_provider:
+
+# see docs/azure.md for details on how to get these values
+#azure_tenant_id:
+#azure_subscription_id:
+#azure_aad_client_id:
+#azure_aad_client_secret:
+#azure_resource_group:
+#azure_location:
+#azure_subnet_name:
+#azure_security_group_name:
+#azure_vnet_name:
+
 
 ## Set these proxy values in order to update docker daemon to use proxies
 # http_proxy: ""
 # https_proxy: ""
 # no_proxy: ""
 
+# Path used to store Docker data
+docker_daemon_graph: "/var/lib/docker"
+
 ## A string of extra options to pass to the docker daemon.
 ## This string should be exactly as you wish it to appear.
 ## An obvious use case is allowing insecure-registry access
 ## to self hosted registries like so:
-docker_options: "--insecure-registry={{ kube_service_addresses }}"
+docker_options: "--insecure-registry={{ kube_service_addresses }} --graph={{ docker_daemon_graph }}"
+
+# K8s image pull policy (imagePullPolicy)
+k8s_image_pull_policy: IfNotPresent
 
 # default packages to install within the cluster
 kpm_packages: []

@@ -1,21 +1,33 @@
 ---
-- hosts: all
+- hosts: localhost
+  gather_facts: False
+  roles:
+    - bastion-ssh-config
+  tags: [localhost, bastion]
+
+- hosts: k8s-cluster:etcd:calico-rr
   any_errors_fatal: true
   gather_facts: false
+  vars:
+    # Need to disable pipelining for bootstrap-os as some systems have requiretty in sudoers set, which makes pipelining
+    # fail. bootstrap-os fixes this on these systems, so in later plays it can be enabled.
+    ansible_ssh_pipelining: false
   roles:
     - bootstrap-os
   tags:
     - bootstrap-os
 
-
-- hosts: all
+- hosts: k8s-cluster:etcd:calico-rr
   any_errors_fatal: true
+  vars:
+    ansible_ssh_pipelining: true
   gather_facts: true
 
-- hosts: all
+- hosts: k8s-cluster:etcd:calico-rr
   any_errors_fatal: true
   roles:
     - { role: kubernetes/preinstall, tags: preinstall }
+    - { role: docker, tags: docker }
 
 - hosts: etcd:!k8s-cluster
   any_errors_fatal: true
@@ -36,10 +48,16 @@
     - { role: kubernetes-apps/lib, tags: apps }
     - { role: kubernetes-apps/network_plugin, tags: network }
 
+- hosts: calico-rr
+  any_errors_fatal: true
+  roles:
+    - { role: network_plugin/calico/rr, tags: network }
+
 - hosts: k8s-cluster
   any_errors_fatal: true
   roles:
     - { role: dnsmasq, tags: dnsmasq }
+    - { role: kubernetes/preinstall, tags: resolvconf }
 
 - hosts: kube-master[0]
   any_errors_fatal: true

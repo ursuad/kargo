@@ -1,22 +1,15 @@
 ---
+- name: Calico | Check calicoctl version
+  run_once: true
+  set_fact:
+    legacy_calicoctl: "{{ calicoctl_image_tag | version_compare('v1.0.0', '<') }}"
+  tags: facts
+
 - name: Calico | Write Calico cni config
   template:
     src: "cni-calico.conf.j2"
     dest: "/etc/cni/net.d/10-calico.conf"
     owner: kube
-
-- name: Calico | Set docker daemon options
-  template:
-    src: docker
-    dest: "/etc/default/docker"
-    owner: root
-    group: root
-    mode: 0644
-  notify:
-    - restart docker
-  when: ansible_os_family != "CoreOS"
-
-- meta: flush_handlers
 
 - name: Calico | Create calico certs directory
   file:
@@ -31,10 +24,11 @@
     src: "{{ etcd_cert_dir }}/{{ item.s }}"
     dest: "{{ calico_cert_dir }}/{{ item.d }}"
     state: hard
+    force: yes
   with_items:
     - {s: "ca.pem", d: "ca_cert.crt"}
-    - {s: "node.pem", d: "cert.crt"}
-    - {s: "node-key.pem", d: "key.pem"}
+    - {s: "node-{{ inventory_hostname }}.pem", d: "cert.crt"}
+    - {s: "node-{{ inventory_hostname }}-key.pem", d: "key.pem"}
 
 - name: Calico | Install calicoctl container script
   template:
@@ -47,21 +41,23 @@
   notify: restart calico-node
 
 - name: Calico | Copy cni plugins from hyperkube
-  command: "/usr/bin/docker run --rm -v /opt/cni/bin:/cnibindir {{ hyperkube_image_repo }}:{{ hyperkube_image_tag }} /usr/bin/rsync -a /opt/cni/bin/ /cnibindir/"
+  command: "{{ docker_bin_dir }}/docker run --rm -v /opt/cni/bin:/cnibindir {{ hyperkube_image_repo }}:{{ hyperkube_image_tag }} /usr/bin/rsync -a /opt/cni/bin/ /cnibindir/"
   register: cni_task_result
   until: cni_task_result.rc == 0
   retries: 4
   delay: "{{ retry_stagger | random + 3 }}"
   changed_when: false
+  tags: [hyperkube, upgrade]
 
 - name: Calico | Copy cni plugins from calico/cni container
-  command: "/usr/bin/docker run --rm -v /opt/cni/bin:/cnibindir {{ calico_cni_image_repo }}:{{ calico_cni_image_tag }} sh -c 'cp -a /opt/cni/bin/* /cnibindir/'"
+  command: "{{ docker_bin_dir }}/docker run --rm -v /opt/cni/bin:/cnibindir {{ calico_cni_image_repo }}:{{ calico_cni_image_tag }} sh -c 'cp -a /opt/cni/bin/* /cnibindir/'"
   register: cni_task_result
   until: cni_task_result.rc == 0
   retries: 4
   delay: "{{ retry_stagger | random + 3 }}"
   changed_when: false
   when: "{{ overwrite_hyperkube_cni|bool }}"
+  tags: [hyperkube, upgrade]
 
 - name: Calico | wait for etcd
   uri: url=https://localhost:2379/health validate_certs=no
@@ -76,17 +72,13 @@
   command: |-
     curl \
       --cacert {{ etcd_cert_dir }}/ca.pem \
-      --cert {{ etcd_cert_dir}}/admin.pem \
-      --key {{ etcd_cert_dir }}/admin-key.pem \
+      --cert {{ etcd_cert_dir}}/admin-{{ groups['etcd'][0] }}.pem \
+      --key {{ etcd_cert_dir }}/admin-{{ groups['etcd'][0] }}-key.pem \
       https://localhost:2379/v2/keys/calico/v1/ipam/v4/pool
   register: calico_conf
   delegate_to: "{{groups['etcd'][0]}}"
   run_once: true
-
-- name: Calico | Check calicoctl version
-  run_once: true
-  set_fact:
-    legacy_calicoctl: "{{ calicoctl_image_tag | version_compare('v1.0.0', '<') }}"
+  tags: facts
 
 - name: Calico | Configure calico network pool
   shell: >
@@ -110,6 +102,7 @@
     ipip_arg: "--ipip"
   when: (legacy_calicoctl and
          cloud_provider is defined or ipip)
+  tags: facts
 
 - name: Calico (old) | Define nat-outgoing pool argument
   run_once: true
@@ -117,12 +110,14 @@
     nat_arg: "--nat-outgoing"
   when: (legacy_calicoctl and
          nat_outgoing|default(false) and not peer_with_router|default(false))
+  tags: facts
 
 - name: Calico (old) | Define calico pool task name
   run_once: true
   set_fact:
     pool_task_name: "with options {{ ipip_arg|default('') }} {{ nat_arg|default('') }}"
   when: (legacy_calicoctl and ipip_arg|default(false) or nat_arg|default(false))
+  tags: facts
 
 - name: Calico (old) | Configure calico network pool {{ pool_task_name|default('') }}
   command: "{{ bin_dir}}/calicoctl pool add {{ kube_pods_subnet }} {{ ipip_arg|default('') }} {{ nat_arg|default('') }}"
@@ -136,8 +131,8 @@
   command: |-
     curl \
       --cacert {{ etcd_cert_dir }}/ca.pem \
-      --cert {{ etcd_cert_dir}}/admin.pem \
-      --key {{ etcd_cert_dir }}/admin-key.pem \
+      --cert {{ etcd_cert_dir}}/admin-{{ groups['etcd'][0] }}.pem \
+      --key {{ etcd_cert_dir }}/admin-{{ groups['etcd'][0] }}-key.pem \
       https://localhost:2379/v2/keys/calico/v1/ipam/v4/pool
   register: calico_pools_raw
   delegate_to: "{{groups['etcd'][0]}}"
@@ -146,6 +141,7 @@
 - set_fact:
     calico_pools: "{{ calico_pools_raw.stdout | from_json }}"
   run_once: true
+  tags: facts
 
 - name: Calico | Check if calico pool is properly configured
   fail:
@@ -154,14 +150,35 @@
   when: ( calico_pools['node']['nodes'] | length > 1 ) or
         ( not calico_pools['node']['nodes'][0]['key'] | search(".*{{ kube_pods_subnet | ipaddr('network') }}.*") )
   run_once: true
+  tags: facts
+
+- name: Calico | Set global as_num
+  command: "{{ bin_dir}}/calicoctl config set asNumber {{ global_as_num }}"
+  run_once: true
+  when: not legacy_calicoctl
+
+- name: Calico (old) | Set global as_num
+  command: "{{ bin_dir}}/calicoctl bgp default-node-as {{ global_as_num }}"
+  run_once: true
+  when: legacy_calicoctl
 
 - name: Calico | Write /etc/network-environment
   template: src=network-environment.j2 dest=/etc/network-environment
   when: ansible_service_mgr in ["sysvinit","upstart"]
 
+- name: Calico (old) | Write calico-node systemd init file
+  template: src=calico-node.service.legacy.j2 dest=/etc/systemd/system/calico-node.service
+  when: ansible_service_mgr == "systemd" and legacy_calicoctl
+  notify: restart calico-node
+
+- name: Calico | Write calico.env for systemd init file
+  template: src=calico.env.j2 dest=/etc/calico/calico.env
+  when: ansible_service_mgr == "systemd" and not legacy_calicoctl
+  notify: restart calico-node
+
 - name: Calico | Write calico-node systemd init file
   template: src=calico-node.service.j2 dest=/etc/systemd/system/calico-node.service
-  when: ansible_service_mgr == "systemd"
+  when: ansible_service_mgr == "systemd" and not legacy_calicoctl
   notify: restart calico-node
 
 - name: Calico | Write calico-node initd script
@@ -174,6 +191,11 @@
   when: ansible_service_mgr in ["sysvinit","upstart"] and ansible_os_family == "RedHat"
   notify: restart calico-node
 
+- name: Calico | Restart calico-node if secrets changed
+  command: /bin/true
+  when: secret_changed|default(false) or etcd_secret_changed|default(false)
+  notify: restart calico-node
+
 - meta: flush_handlers
 
 - name: Calico | Enable calico-node
@@ -184,29 +206,56 @@
 
 - name: Calico | Disable node mesh
   shell: "{{ bin_dir }}/calicoctl config set nodeToNodeMesh off"
-  when: (not legacy_calicoctl and
-         peer_with_router|default(false) and inventory_hostname in groups['kube-node'])
+  when: ((peer_with_router|default(false) or peer_with_calico_rr|default(false))
+          and inventory_hostname in groups['kube-node']
+          and not legacy_calicoctl)
+  run_once: true
 
 - name: Calico | Configure peering with router(s)
   shell: >
    echo '{
-   "kind": "bgppeer",
-   "spec": {"asNumber": {{ item.as }}},
+   "kind": "bgpPeer",
+   "spec": {"asNumber": "{{ item.as }}"},
    "apiVersion": "v1",
-   "metadata": {"node": "rack1-host1", "scope": "node", "peerIP": "{{ item.router_id }}"}
+   "metadata": {"node": "{{ inventory_hostname }}", "scope": "node", "peerIP": "{{ item.router_id }}"}
    }'
    | {{ bin_dir }}/calicoctl create -f -
-  with_items: peers
+  with_items: "{{ peers|default([]) }}"
   when: (not legacy_calicoctl and
          peer_with_router|default(false) and inventory_hostname in groups['kube-node'])
 
+- name: Calico | Configure peering with route reflectors
+  shell: >
+   echo '{
+   "kind": "bgpPeer",
+   "spec": {"asNumber": "{{ local_as | default(global_as_num)}}"},
+   "apiVersion": "v1",
+   "metadata": {"node": "{{ inventory_hostname }}",
+     "scope": "node",
+     "peerIP": "{{ hostvars[item]["calico_rr_ip"]|default(hostvars[item]["ip"]) }}"}
+   }'
+   | {{ bin_dir }}/calicoctl create --skip-exists -f -
+  with_items: "{{ groups['calico-rr'] | default([]) }}"
+  when: (not legacy_calicoctl and
+         peer_with_calico_rr|default(false) and inventory_hostname in groups['kube-node']
+         and hostvars[item]['cluster_id'] == cluster_id)
+
 - name: Calico (old) | Disable node mesh
   shell: "{{ bin_dir }}/calicoctl bgp node-mesh off"
-  when: (legacy_calicoctl and
-         peer_with_router|default(false) and inventory_hostname in groups['kube-node'])
+  when: ((peer_with_router|default(false) or peer_with_calico_rr|default(false))
+          and inventory_hostname in groups['kube-node']
+          and legacy_calicoctl)
+  run_once: true
 
 - name: Calico (old) | Configure peering with router(s)
   shell: "{{ bin_dir }}/calicoctl node bgp peer add {{ item.router_id }} as {{ item.as }}"
-  with_items: peers
+  with_items: "{{ peers|default([]) }}"
   when: (legacy_calicoctl and
          peer_with_router|default(false) and inventory_hostname in groups['kube-node'])
+
+- name: Calico (old) | Configure peering with route reflectors
+  shell: "{{ bin_dir }}/calicoctl node bgp peer add {{ hostvars[item]['calico_rr_ip']|default(hostvars[item]['ip']) }} as {{ local_as | default(global_as_num) }}"
+  with_items: "{{ groups['calico-rr'] | default([]) }}"
+  when: (legacy_calicoctl and
+         peer_with_calico_rr|default(false) and inventory_hostname in groups['kube-node']
+         and hostvars[item]['cluster_id'] == cluster_id)

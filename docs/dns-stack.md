@@ -1,15 +1,24 @@
 K8s DNS stack by Kargo
 ======================
 
-Kargo configures a [Kubernetes DNS](http://kubernetes.io/docs/admin/dns/)
+For K8s cluster nodes, kargo configures a [Kubernetes DNS](http://kubernetes.io/docs/admin/dns/)
 [cluster add-on](http://releases.k8s.io/master/cluster/addons/README.md)
 to serve as an authoritative DNS server for a given ``dns_domain`` and its
 ``svc, default.svc`` default subdomains (a total of ``ndots: 5`` max levels).
 
-Note, additional search (sub)domains may be defined in the ``searchdomains``
+Other nodes in the inventory, like external storage nodes or a separate etcd cluster
+node group, considered non-cluster and left up to the user to configure DNS resolve.
+
+Note, custom ``ndots`` values affect only the dnsmasq daemon set (explained below).
+While the kubedns has the ``ndots=5`` hardcoded, which is not recommended due to
+[DNS performance reasons](https://github.com/kubernetes/kubernetes/issues/14051).
+You can use config maps for the kubedns app to workaround the issue, which is
+yet in the Kargo scope.
+
+Additional search (sub)domains may be defined in the ``searchdomains``
 and ``ndots`` vars. And additional recursive DNS resolvers in the `` upstream_dns_servers``,
-``nameservers`` vars. Intranet DNS resolvers should be specified in the first
-place, followed by external resolvers, for example:
+``nameservers`` vars. Intranet/cloud provider DNS resolvers should be specified
+in the first place, followed by external resolvers, for example:
 
 ```
 skip_dnsmasq: true
@@ -21,7 +30,33 @@ or
 skip_dnsmasq: false
 upstream_dns_servers: [172.18.32.6, 172.18.32.7, 8.8.8.8, 8.8.8.4]
 ```
-The vars are explained below as well.
+The vars are explained below. For the early cluster deployment stage, when there
+is yet K8s cluster and apps exist, a user may expect local repos to be
+accessible via authoritative intranet resolvers. For that case, if none custom vars
+was specified, the default resolver is set to either the cloud provider default
+or `8.8.8.8`. And domain is set to the default ``dns_domain`` value as well.
+Later, the nameservers will be reconfigured to the DNS service IP that Kargo
+configures for K8s cluster.
+
+Also note, existing records will be purged from the `/etc/resolv.conf`,
+including resolvconf's base/head/cloud-init config files and those that come from dhclient.
+This is required for hostnet pods networking and for [kubelet to not exceed search domains
+limits](https://github.com/kubernetes/kubernetes/issues/9229).
+
+Instead, new domain, search, nameserver records and options will be defined from the
+aforementioned vars:
+* Superseded via dhclient's DNS update hook.
+* Generated via cloud-init (CoreOS only).
+* Statically defined in the `/etc/resolv.conf`, if none of above is applicable.
+* Resolvconf's head/base files are disabled from populating anything into the
+  `/etc/resolv.conf`.
+
+It is important to note that multiple search domains combined with high ``ndots``
+values lead to poor performance of DNS stack, so please choose it wisely.
+The dnsmasq DaemonSet can accept lower ``ndots`` values and return NXDOMAIN
+replies for [bogus internal FQDNS](https://github.com/kubernetes/kubernetes/issues/19634#issuecomment-253948954)
+before it even hits the kubedns app. This enables dnsmasq to serve as a
+protective, but still recursive resolver in front of kubedns.
 
 DNS configuration details
 -------------------------
@@ -78,8 +113,7 @@ Limitations
   [no way to specify a custom value](https://github.com/kubernetes/kubernetes/issues/33554)
   for the SkyDNS ``ndots`` param via an
   [option for KubeDNS](https://github.com/kubernetes/kubernetes/blob/master/cmd/kube-dns/app/options/options.go)
-  add-on, while SkyDNS supports it though. Thus, DNS SRV records may not work
-  as expected as they require the ``ndots:7``.
+  add-on, while SkyDNS supports it though.
 
 * the ``searchdomains`` have a limitation of a 6 names and 256 chars
   length. Due to default ``svc, default.svc`` subdomains, the actual

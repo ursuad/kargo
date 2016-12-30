@@ -2,15 +2,23 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: kube-apiserver
-  namespace: kube-system
+  namespace: {{system_namespace}}
   labels:
     k8s-app: kube-apiserver
+    kargo: v2
 spec:
   hostNetwork: true
   containers:
   - name: kube-apiserver
     image: {{ hyperkube_image_repo }}:{{ hyperkube_image_tag }}
     imagePullPolicy: {{ k8s_image_pull_policy }}
+    resources:
+      limits:
+        cpu: {{ kube_apiserver_cpu_limit }}
+        memory: {{ kube_apiserver_memory_limit }}
+      requests:
+        cpu: {{ kube_apiserver_cpu_requests }}
+        memory: {{ kube_apiserver_memory_requests }}
     command:
     - /hyperkube
     - apiserver
@@ -18,8 +26,8 @@ spec:
     - --etcd-servers={{ etcd_access_endpoint }}
     - --etcd-quorum-read=true
     - --etcd-cafile={{ etcd_cert_dir }}/ca.pem
-    - --etcd-certfile={{ etcd_cert_dir }}/node.pem
-    - --etcd-keyfile={{ etcd_cert_dir }}/node-key.pem
+    - --etcd-certfile={{ etcd_cert_dir }}/node-{{ inventory_hostname }}.pem
+    - --etcd-keyfile={{ etcd_cert_dir }}/node-{{ inventory_hostname }}-key.pem
     - --insecure-bind-address={{ kube_apiserver_insecure_bind_address }}
     - --apiserver-count={{ kube_apiserver_count }}
     - --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,DefaultStorageClass,ResourceQuota
@@ -48,6 +56,9 @@ spec:
     - --cloud-config={{ kube_config_dir }}/cloud_config
 {% elif cloud_provider is defined and cloud_provider == "aws" %}
     - --cloud-provider={{ cloud_provider }}
+{% endif %}
+{% if kube_api_anonymous_auth is defined and kube_version | version_compare('v1.5', '>=')  %}
+    - --anonymous-auth={{ kube_api_anonymous_auth }}
 {% endif %}
     livenessProbe:
       httpGet:

@@ -10,7 +10,7 @@ Wants=docker.socket
 {% endif %}
 
 [Service]
-EnvironmentFile=/etc/kubernetes/kubelet.env
+EnvironmentFile={{kube_config_dir}}/kubelet.env
 ExecStart={{ bin_dir }}/kubelet \
 		$KUBE_LOGTOSTDERR \
 		$KUBE_LOG_LEVEL \
@@ -21,11 +21,10 @@ ExecStart={{ bin_dir }}/kubelet \
 		$KUBE_ALLOW_PRIV \
 		$KUBELET_ARGS \
 		$DOCKER_SOCKET \
-		$KUBELET_REGISTER_NODE \
 		$KUBELET_NETWORK_PLUGIN \
 		$KUBELET_CLOUDPROVIDER
-ExecStartPre=-/usr/bin/docker rm -f kubelet
-ExecReload=/usr/bin/docker restart kubelet
+ExecStartPre=-{{ docker_bin_dir }}/docker rm -f kubelet
+ExecReload={{ docker_bin_dir }}/docker restart kubelet
 Restart=always
 RestartSec=10s
 

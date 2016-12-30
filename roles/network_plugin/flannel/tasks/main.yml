@@ -10,8 +10,8 @@
 - name: Flannel | Create flannel pod manifest
   template:
     src: flannel-pod.yml
-    dest: /etc/kubernetes/manifests/flannel-pod.manifest
-  notify: delete default docker bridge
+    dest: "{{kube_manifest_dir}}/flannel-pod.manifest"
+  notify: Flannel | delete default docker bridge
 
 - name: Flannel | Wait for flannel subnet.env file presence
   wait_for:
@@ -26,6 +26,7 @@
 
 - set_fact:
     flannel_subnet: "{{ flannel_subnet_output.stdout }}"
+  tags: facts
 
 - name: Flannel | Get flannel_mtu from subnet.env
   shell: cat /run/flannel/subnet.env | awk -F'=' '$1 == "FLANNEL_MTU" {print $2}'
@@ -34,28 +35,54 @@
 
 - set_fact:
     flannel_mtu: "{{ flannel_mtu_output.stdout }}"
+  tags: facts
 
-- name: Flannel | Set docker daemon options
-  template:
-    src: docker
-    dest: "/etc/default/docker"
+- set_fact:
+    docker_options_file: >-
+      {%- if ansible_os_family == "Debian" -%}/etc/default/docker{%- elif ansible_os_family == "RedHat" -%}/etc/sysconfig/docker{%- endif -%}
+  tags: facts
+
+- set_fact:
+    docker_options_name: >-
+      {%- if ansible_os_family == "Debian" -%}DOCKER_OPTS{%- elif ansible_os_family == "RedHat" -%}other_args{%- endif -%}
+  tags: facts
+
+- set_fact:
+    docker_network_options: '"--bip={{ flannel_subnet }} --mtu={{ flannel_mtu }}"'
+  tags: facts
+
+- name: Flannel | Remove non-systemd docker daemon network options that don't match desired line
+  lineinfile:
+    dest: "{{ docker_options_file }}"
+    regexp: "^DOCKER_NETWORK_OPTIONS=(?!{{ docker_network_options|regex_escape() }})"
+    state: absent
+  when: ansible_service_mgr in ["sysvinit","upstart"]
+
+- name: Flannel | Set non-systemd docker daemon network options
+  lineinfile:
+    dest: "{{ docker_options_file }}"
+    line: DOCKER_NETWORK_OPTIONS={{ docker_network_options }}
+    insertbefore: ^{{ docker_options_name }}=
     owner: root
     group: root
     mode: 0644
   notify:
-    - restart docker
-  when: ansible_os_family != "CoreOS"
+    - Flannel | restart docker
+  when: ansible_service_mgr in ["sysvinit","upstart"]
 
-- name: Flannel | Create docker service path for CoreOS
-  file: path=/etc/systemd/system/docker.service.d state=directory
-  when: ansible_os_family == "CoreOS"
+- name: Flannel | Ensure path for docker network systemd drop-in
+  file:
+    path: "/etc/systemd/system/docker.service.d"
+    state: directory
+    owner: root
+  when: ansible_service_mgr == "systemd"
 
-- name: Flannel | Create docker dropin for CoreOS
+- name: Flannel | Create docker network systemd drop-in
   template:
-    src: docker-systemd
+    src: flannel-options.conf.j2
     dest: "/etc/systemd/system/docker.service.d/flannel-options.conf"
   notify:
-    - restart docker
-  when: ansible_os_family == "CoreOS"
+    - Flannel | restart docker
+  when: ansible_service_mgr == "systemd"
 
 - meta: flush_handlers

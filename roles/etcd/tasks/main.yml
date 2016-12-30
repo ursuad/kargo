@@ -1,9 +1,13 @@
 ---
 - include: pre_upgrade.yml
+  tags: etcd-pre-upgrade
 - include: check_certs.yml
+  tags: [etcd-secrets, facts]
 - include: gen_certs.yml
+  tags: etcd-secrets
 - include: install.yml
   when: is_etcd_master
+  tags: upgrade
 - include: set_cluster_health.yml
   when: is_etcd_master
 - include: configure.yml
@@ -18,10 +22,11 @@
     enabled: yes
   when: is_etcd_master
 
-- name: Restart etcd if binary changed
+- name: Restart etcd if binary or certs changed
   command: /bin/true
   notify: restart etcd
   when: etcd_deployment_type == "host" and etcd_copy.stdout_lines and is_etcd_master
+    or etcd_secret_changed|default(false)
 
 # Reload systemd before starting service
 - meta: flush_handlers
